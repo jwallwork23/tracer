@@ -165,8 +165,8 @@ def solve_and_estimate_error(prev_sol=None, counter=0, iteration=0, op=TracerOpt
     options.horizontal_diffusivity = nu
     options.tracer_source_2d = source
     solver_obj.assign_initial_conditions(elev=eta0, uv=u0, tracer=prev_sol)
-    solver_obj.i_export = its
-    solver_obj.next_export_t = its * options.simulation_export_time
+    solver_obj.i_export = iteration
+    solver_obj.next_export_t = iteration * options.simulation_export_time
     solver_obj.iteration = its * op.dt_per_export
     solver_obj.simulation_time = solver_obj.iteration * op.dt
     for e in solver_obj.exporters.values():
@@ -188,8 +188,6 @@ def solve_and_estimate_error(prev_sol=None, counter=0, iteration=0, op=TracerOpt
         print("Cell residual: {:.4e}".format(norm(cell_res)))
 
         edge_res = tracer_ts.edge_residual(adjoint)
-        if edge_res == 0:
-            edge_res = Constant(0., domain=mesh)
         print("Edge residual: {:.4e}".format(norm(edge_res)))
 
         I = TestFunction(P0)
@@ -233,7 +231,7 @@ if __name__ == "__main__":
                 op.end_time += restart_time
                 t = solver_obj.simulation_time
             # FIXME: Why does restarted step have a different norm? - times not in sync?
-            # TODO: Adapt mesh
+            # TODO: Adapt mesh using mesh_adapt driver
     elif op.approach == 'HessianBased':
         restart_time = op.dt * op.dt_per_export
         T_end = copy(op.end_time)
