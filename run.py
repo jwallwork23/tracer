@@ -100,7 +100,7 @@ def store_adjoint(solver_obj, tape, op=TracerOptions()):
     for i in range(op.adjoint_steps - 1, remainder - 2, -op.dt_per_export):  # FIXME: Why -2?
         adjoint.assign(solve_blocks[i].adj_sol)
         idx = int((i+1) / op.dt_per_export) - remainder
-        index_str = index_string(idx)
+        index_str = index_string(idx)  # TODO: Should this loop go the other way?
         with DumbCheckpoint(op.directory() + 'hdf5/Adjoint2d_' + index_str, mode=FILE_CREATE) as sa:
             sa.store(adjoint)
             sa.close()
@@ -176,7 +176,6 @@ def solve_and_estimate_error(prev_sol=None, counter=0, iteration=0, op=TracerOpt
     print("\nSolving forward problem and estimating errors...")
     solver_obj.iterate()
 
-    tracer_ts = solver_obj.timestepper.timesteppers['tracer']
     adjoint = Function(P1DG, name='adjoint_2d')
     index_str = index_string(counter)
     with DumbCheckpoint(op.directory() + 'hdf5/Adjoint2d_' + index_str, mode=FILE_READ) as la:
@@ -184,17 +183,30 @@ def solve_and_estimate_error(prev_sol=None, counter=0, iteration=0, op=TracerOpt
         la.close()
 
     if op.approach == 'DWR':
+        # TODO: Use z-z_h form
+        tracer_ts = solver_obj.timestepper.timesteppers['tracer']
         cell_res = tracer_ts.cell_residual(adjoint)
         print("Cell residual: {:.4e}".format(norm(cell_res)))
-
         edge_res = tracer_ts.edge_residual(adjoint)
         print("Edge residual: {:.4e}".format(norm(edge_res)))
 
-        I = TestFunction(P0)
-        h = CellSize(mesh)
-        epsilon = project(sqrt(assemble(I * (h * h * cell_res * cell_res + h * edge_res * edge_res) * dx)), P0)
+        # i = TestFunction(P0)
+        # h = CellSize(mesh)
+        # epsilon = project(sqrt(assemble(i * (h * h * cell_res * cell_res + h * edge_res * edge_res) * dx)), P0)
+
+        # Adaptive strategies, as in [Rognes & Logg, 2010]
+        if op.dwr_approach == 'error_representation':
+            epsilon.project(cell_res + edge_res, P1)
+        elif op.dwr_approach == 'dwr':
+            epsilon.project(cell_res + jump(edge_res), P1)
+        elif op.dwr_approach == 'cell_facet_split':
+            epsilon.project(cell_res + abs(jump(edge_res)), P1)
+        else:
+            raise ValueError("DWR approach {:s} not recognised.".format(op.dwr_approach))
+
     elif op.approach == 'DWP':
-        epsilon = project(solver_obj.fields.tracer_2d * adjoint, P0)
+        epsilon = project(solver_obj.fields.tracer_2d * adjoint, P1)
+    epsilon = normalise_indicator(epsilon, op=op)
     epsilon.rename('error_estimate_2d')
     op.estimator_outfile.write(epsilon, time=solver_obj.simulation_time)
 
@@ -205,11 +217,15 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-a", help="Choose adaptive approach from {'HessianBased', 'DWP', 'DWR'} (default 'FixedMesh')")
+    parser.add_argument("-approach", help="Choose adaptive approach from {'HessianBased', 'DWP', 'DWR'} (default 'FixedMesh')")
+    parser.add_argument("-dwr_approach", help="DWR error estimation approach")
     args = parser.parse_args()
 
-    op = TracerOptions(approach='FixedMesh' if args.a is None else args.a)
-    #op.end_time = 5. - 0.5*op.dt
+    op = TracerOptions(approach='FixedMesh' if args.approach is None else args.approach)
+    # op.end_time = 5. - 0.5*op.dt
+
+    if args.dwr_approach is not None:
+        op.dwr_approach = args.dwr_approach
 
     # DWP and DWR estimators both use this workflow
     if op.solve_adjoint:
