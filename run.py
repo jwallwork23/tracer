@@ -33,7 +33,6 @@ def solve_tracer(prev_sol=None, iteration=0, op=TracerOptions()):
         mesh = prev_sol.function_space().mesh()
     x, y = SpatialCoordinate(mesh)
     P1 = FunctionSpace(mesh, "CG", 1)
-    P1DG = FunctionSpace(mesh, "DG", 1)
     P1_vec = VectorFunctionSpace(mesh, "CG", 1)
 
     # Initial and source conditions
